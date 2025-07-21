@@ -23,16 +23,14 @@ python SF_CMP_INRIX_Network_Conflation.py
 
 import argparse
 import math
-import os
 import tomllib
 import warnings
 from pathlib import Path
 
-import fiona
 import geopandas as gpd
 import numpy as np
 import pandas as pd
-from shapely.geometry import Point, mapping
+from shapely.geometry import LineString, MultiLineString, MultiPoint, Point, mapping
 
 warnings.filterwarnings("ignore")
 
@@ -43,6 +41,43 @@ cal3 = {
     "datum": "NAD83",
     "no_defs": True,
 }
+
+
+def _geometry_get_start_end_vertices(linelike_geometry: LineString | MultiLineString):
+    if isinstance(linelike_geometry, LineString):
+        coords = list(linelike_geometry.coords)
+        start = coords[0]
+        end = coords[-1]
+    elif isinstance(linelike_geometry, MultiLineString):
+        lines = list(linelike_geometry.geoms)
+        start = list(lines[0].coords)[0]
+        end = list(lines[-1].coords)[-1]
+    return MultiPoint([start, end])
+
+
+def gdf_get_start_end_vertices(linelike_gdf, cols_to_keep, latlong_cols=True):
+    start_end_vertex_gdf = (
+        # replace (Multi)LineString geometry column with
+        # geometry column of MultiPoint([start_vertex, end_vertex])
+        linelike_gdf[cols_to_keep]
+        .set_geometry(
+            linelike_gdf.geometry.map(_geometry_get_start_end_vertices), drop=True
+        )
+        # explode the geometry column of MultiPoints (each of the start & end vertices)
+        # to each point having their own row, then using the index level 1 to set the
+        # type column as "start" or "end"
+        .explode(index_parts=True)
+        .reset_index(level=1)
+        .rename(columns={"level_1": "type"})
+    )
+    start_end_vertex_gdf["type"] = start_end_vertex_gdf["type"].map(
+        {0: "begin", 1: "end"}
+    )
+    if latlong_cols:  # TODO remove this and just use the Point geometry col directly
+        start_end_vertex_gdf["Latitude"] = start_end_vertex_gdf.geometry.y
+        start_end_vertex_gdf["Longitude"] = start_end_vertex_gdf.geometry.x
+    return start_end_vertex_gdf.reset_index(drop=True)
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -55,16 +90,19 @@ if __name__ == "__main__":
         raise NotImplementedError
 
     inrix_map_version = config["inrix_map_version"]
-    inrix_sf_network_gis_filepath = config["input_gis_filepath"][
-        "inrix_sf_network"
-    ].format(inrix_map_version=inrix_map_version)
+    inrix_sf_network_gis_filepath = Path(config["input_gis_filepath"]["dir"]) / config[
+        "input_gis_filepath"
+    ]["inrix_sf_network"].format(inrix_map_version=inrix_map_version)
     inrix_segid_col = "XDSegID"
     cmp_segments_gis_filepath = config["input_gis_filepath"]["cmp_segments"][
         config["mode"]
     ]
     output_dir = Path(config["output"]["dir"])
+    output_filename_base = config["output"]["filename_base"].format(
+        inrix_map_version=inrix_map_version
+    )
     output_filepath = output_dir / (
-        config["output"]["filename_base"].format(inrix_map_version=inrix_map_version)
+        output_filename_base
         + ("_Manual" if config["manual_update"]["manual_update"] else "")
         + ("-expandednetwork" if config["mode"] == "monthly" else "")
         + ".csv"
@@ -72,124 +110,50 @@ if __name__ == "__main__":
 
     # Convert original coordinate system to California III state plane
     # CMP network
-    cmp_segments = gpd.read_file(cmp_segments_gis_filepath + ".gpkg").to_crs(cal3)
+    cmp_segments = gpd.read_file(cmp_segments_gis_filepath).to_crs(cal3)
     cmp_segments["cmp_name"] = cmp_segments["cmp_name"].str.replace("/ ", "/")
-    cmp_segments["Length"] = cmp_segments.geometry.length
-    cmp_segments["Length"] = cmp_segments["Length"] * 3.2808  # meters to feet
-    cmp_segments.to_file(os.path.splitext(cmp_segments_gis_filepath)[0] + "_prj.gpkg")
+    # replace length column in CMP segments (mi) GIS file with length in the CRS unit
+    cmp_segments["length"] = cmp_segments.geometry.length
+    cmp_segments["length"] = cmp_segments["length"] * 3.2808  # meters to feet
 
     # INRIX XD network
     # HOTFIX, leaving this hardcoded for now
-    inrix_network = gpd.read_file(inrix_sf_network_gis_filepath + ".gpkg").to_crs(cal3)
-    inrix_network["Length"] = inrix_network.geometry.length
-    inrix_network["Length"] = inrix_network["Length"] * 3.2808  # meters to feet
+    inrix_network = gpd.read_file(inrix_sf_network_gis_filepath).to_crs(cal3)
+    inrix_network["length"] = inrix_network.geometry.length
+    inrix_network["length"] = inrix_network["length"] * 3.2808  # meters to feet
     inrix_network["SegID"] = inrix_network[inrix_segid_col].astype(int)
     inrix_network["Miles"] = inrix_network["Miles"].astype(float)
     inrix_network = inrix_network.rename(
         columns={"PreviousXD": "PreviousSe", "NextXDSegI": "NextSegID"}
     )
-    inrix_network.to_file(
-        os.path.splitext(inrix_sf_network_gis_filepath)[0] + "_prj.gpkg"
-    )
 
-    # # Get endpoints of INRIX links
-    # Attributes to be included
-    vschema = {
-        "geometry": "Point",
-        "properties": {
-            "SegID": "int",
-            "RoadName": "str",
-            "type": "str",
-            "Latitude": "float",
-            "Longitude": "float",
-        },
-    }
-    # Input file
-    inrixin = inrix_sf_network_gis_filepath + "_prj.gpkg"
-    # Output file
-    inrixout = inrix_sf_network_gis_filepath + "_prj_endpoints.gpkg"
-    with fiona.open(
-        inrixout, mode="w", crs=cal3, driver="GPKG", schema=vschema
-    ) as output:
-        layer = fiona.open(inrixin)
-        for line in layer:
-            vertices = line["geometry"]["coordinates"]
-            v_begin = vertices[0]
-            if isinstance(v_begin, list):
-                v_begin = vertices[0][0]
-                point = Point(float(v_begin[0]), float(v_begin[1]))
-                prop = {
-                    "SegID": int(line["properties"]["SegID"]),
-                    "RoadName": line["properties"]["RoadName"],
-                    "type": "begin",
-                    "Latitude": float(v_begin[1]),
-                    "Longitude": float(v_begin[0]),
-                }
-                output.write({"geometry": mapping(point), "properties": prop})
-            else:
-                point = Point(float(v_begin[0]), float(v_begin[1]))
-                prop = {
-                    "SegID": int(line["properties"]["SegID"]),
-                    "RoadName": line["properties"]["RoadName"],
-                    "type": "begin",
-                    "Latitude": float(v_begin[1]),
-                    "Longitude": float(v_begin[0]),
-                }
-                output.write({"geometry": mapping(point), "properties": prop})
-
-            v_end = vertices[-1]
-            if isinstance(v_end, list):
-                v_end = vertices[-1][-1]
-                point = Point(float(v_end[0]), float(v_end[1]))
-                prop = {
-                    "SegID": int(line["properties"]["SegID"]),
-                    "RoadName": line["properties"]["RoadName"],
-                    "type": "end",
-                    "Latitude": float(v_end[1]),
-                    "Longitude": float(v_end[0]),
-                }
-                output.write({"geometry": mapping(point), "properties": prop})
-
-            else:
-                point = Point(float(v_end[0]), float(v_end[1]))
-                prop = {
-                    "SegID": int(line["properties"]["SegID"]),
-                    "RoadName": line["properties"]["RoadName"],
-                    "type": "end",
-                    "Latitude": float(v_end[1]),
-                    "Longitude": float(v_end[0]),
-                }
-                output.write({"geometry": mapping(point), "properties": prop})
-
-    # Read in the created inrix endpoints file
-    endpoints = gpd.read_file(inrix_sf_network_gis_filepath + "_prj_endpoints.gpkg")
+    inrix_endpoints = gdf_get_start_end_vertices(inrix_network, ["SegID", "RoadName"])
 
     # Assign unique node id
     endpoints_cnt = (
-        endpoints.groupby(["Latitude", "Longitude"]).SegID.count().reset_index()
+        inrix_endpoints.groupby(["geometry", "Latitude", "Longitude"])
+        .SegID.count()
+        .reset_index()
+        # CH NOTE: NodeCnt refers to the segment ID
+        .rename(columns={"SegID": "NodeCnt"})
     )
-    endpoints_cnt.rename(columns={"SegID": "NodeCnt"}, inplace=True)
     endpoints_cnt["NodeID"] = endpoints_cnt.index + 1
+    # endpoints_cnt.to_file(
+    #     output_dir / (output_filename_base + "-inrix_endpoints_unique.gpkg")
+    # )
 
-    # Generate the the unique node shapefile
-    endpoints_cnt["Coordinates"] = list(
-        zip(endpoints_cnt.Longitude, endpoints_cnt.Latitude)
-    )
-    endpoints_cnt["Coordinates"] = endpoints_cnt["Coordinates"].apply(Point)
-    endpoints_cnt_gpd = gpd.GeoDataFrame(endpoints_cnt, geometry="Coordinates")
-    endpoints_cnt_gpd.to_file(
-        inrix_sf_network_gis_filepath + "_prj_endpoints_unique.gpkg"
+    inrix_endpoints = inrix_endpoints.merge(
+        endpoints_cnt, on=["geometry", "Latitude", "Longitude"], how="left"
     )
 
-    endpoints = endpoints.merge(endpoints_cnt, on=["Latitude", "Longitude"], how="left")
-
+    # TODO can we just use the Point geometry col directly instead of lat/long?
     # Attached the endpoint information to the link network
-    endpoints_begin = endpoints[endpoints["type"] == "begin"][
+    endpoints_begin = inrix_endpoints[inrix_endpoints["type"] == "begin"][
         ["SegID", "Latitude", "Longitude", "NodeID"]
     ]
     endpoints_begin.columns = ["SegID", "B_Lat", "B_Long", "B_NodeID"]
 
-    endpoints_end = endpoints[endpoints["type"] == "end"][
+    endpoints_end = inrix_endpoints[inrix_endpoints["type"] == "end"][
         ["SegID", "Latitude", "Longitude", "NodeID"]
     ]
     endpoints_end.columns = ["SegID", "E_Lat", "E_Long", "E_NodeID"]
@@ -197,87 +161,10 @@ if __name__ == "__main__":
     inrix_network = inrix_network.merge(endpoints_begin, on="SegID")
     inrix_network = inrix_network.merge(endpoints_end, on="SegID")
 
-    # # Get endnodes of CMP segments
-    # Attributes to be included
-    cmp_schema = {
-        "geometry": "Point",
-        "properties": {
-            "cmp_segid": "int",
-            "cmp_name": "str",
-            "type": "str",
-            "NodeID": "int",
-            "Latitude": "float",
-            "Longitude": "float",
-        },
-    }
-    node_cnt = 0
-    # Input file
-    cmpin = cmp_segments_gis_filepath + "_prj.gpkg"
-
-    # Output file
-    cmpout = cmp_segments_gis_filepath + "_prj_endpoints.gpkg"
-    with fiona.open(
-        cmpout, mode="w", crs=cal3, driver="GPKG", schema=cmp_schema
-    ) as output:
-        layer = fiona.open(cmpin)
-        for line in layer:
-            vertices = line["geometry"]["coordinates"]
-
-            node_cnt = node_cnt + 1
-            v_begin = vertices[0]
-            if isinstance(v_begin, list):
-                v_begin = vertices[0][0]
-                point = Point(float(v_begin[0]), float(v_begin[1]))
-                prop = {
-                    "cmp_segid": int(line["properties"]["cmp_segid"]),
-                    "cmp_name": line["properties"]["cmp_name"],
-                    "NodeID": node_cnt,
-                    "type": "begin",
-                    "Latitude": float(v_begin[1]),
-                    "Longitude": float(v_begin[0]),
-                }
-                output.write({"geometry": mapping(point), "properties": prop})
-            else:
-                point = Point(float(v_begin[0]), float(v_begin[1]))
-                prop = {
-                    "cmp_segid": int(line["properties"]["cmp_segid"]),
-                    "cmp_name": line["properties"]["cmp_name"],
-                    "NodeID": node_cnt,
-                    "type": "begin",
-                    "Latitude": float(v_begin[1]),
-                    "Longitude": float(v_begin[0]),
-                }
-                output.write({"geometry": mapping(point), "properties": prop})
-
-            node_cnt = node_cnt + 1
-            v_end = vertices[-1]
-            if isinstance(v_end, list):
-                v_end = vertices[-1][-1]
-                point = Point(float(v_end[0]), float(v_end[1]))
-                prop = {
-                    "cmp_segid": int(line["properties"]["cmp_segid"]),
-                    "cmp_name": line["properties"]["cmp_name"],
-                    "NodeID": node_cnt,
-                    "type": "end",
-                    "Latitude": float(v_end[1]),
-                    "Longitude": float(v_end[0]),
-                }
-                output.write({"geometry": mapping(point), "properties": prop})
-
-            else:
-                point = Point(float(v_end[0]), float(v_end[1]))
-                prop = {
-                    "cmp_segid": int(line["properties"]["cmp_segid"]),
-                    "cmp_name": line["properties"]["cmp_name"],
-                    "NodeID": node_cnt,
-                    "type": "end",
-                    "Latitude": float(v_end[1]),
-                    "Longitude": float(v_end[0]),
-                }
-                output.write({"geometry": mapping(point), "properties": prop})
-
-    # Read in the created cmp endpoints
-    cmp_endpoints = gpd.read_file(cmp_segments_gis_filepath + "_prj_endpoints.gpkg")
+    # Get endnodes of CMP segments
+    cmp_endpoints = gdf_get_start_end_vertices(
+        cmp_segments, ["cmp_segid", "cmp_name"]
+    ).reset_index(names="NodeID")
 
     cmp_endpoint_b = cmp_endpoints[cmp_endpoints["type"] == "begin"][
         ["cmp_segid", "Latitude", "Longitude", "NodeID"]
@@ -309,16 +196,18 @@ if __name__ == "__main__":
         cmp_segs_buffer.geometry.buffer(mt * 2),
         cmp_segs_buffer.geometry.buffer(mt),
     )
-    cmp_segs_buffer.to_file(cmp_segments_gis_filepath + "_prj_buffer.gpkg")
+    # cmp_segs_buffer.to_file(
+    #     output_dir / (output_filename_base + "-cmp_segments_buffer.gpkg")
+    # )
 
     # INRIX lines intersecting cmp segment buffer zone
     inrix_lines_intersect = gpd.sjoin(
-        inrix_network, cmp_segs_buffer, op="intersects"
+        inrix_network, cmp_segs_buffer, predicate="intersects"
     ).reset_index()
 
     # INRIX lines within cmp segment buffer zone
     inrix_lines_within = gpd.sjoin(
-        inrix_network, cmp_segs_buffer, op="within"
+        inrix_network, cmp_segs_buffer, predicate="within"
     ).reset_index()
 
     # ## Determine matching INRIX links within each CMP buffer
@@ -327,7 +216,7 @@ if __name__ == "__main__":
     for cmp_seg_idx in range(len(cmp_segments)):
         cmp_seg_id = cmp_segments.loc[cmp_seg_idx, "cmp_segid"]
         cmp_seg_geo = cmp_segments.loc[cmp_seg_idx]["geometry"]
-        cmp_seg_len = cmp_segments.loc[cmp_seg_idx]["Length"]
+        cmp_seg_len = cmp_segments.loc[cmp_seg_idx]["length"]
         cmp_b_lat = cmp_segments.loc[cmp_seg_idx]["B_Lat"]
         cmp_b_long = cmp_segments.loc[cmp_seg_idx]["B_Long"]
         cmp_e_lat = cmp_segments.loc[cmp_seg_idx]["E_Lat"]
@@ -544,7 +433,7 @@ if __name__ == "__main__":
     cmp_segments["Len_Ratio"] = np.where(
         pd.isnull(cmp_segments["Len_Matched"]),
         0.0,
-        cmp_segments["Len_Matched"] / cmp_segments["Length"],
+        cmp_segments["Len_Matched"] / cmp_segments["length"],
     )
     cmp_segments["Len_Ratio"] = cmp_segments["Len_Ratio"].round(1)
 
@@ -564,7 +453,7 @@ if __name__ == "__main__":
             cmp_b_long = cmp_segments.loc[cmp_seg_idx]["B_Long"]
             cmp_e_lat = cmp_segments.loc[cmp_seg_idx]["E_Lat"]
             cmp_e_long = cmp_segments.loc[cmp_seg_idx]["E_Long"]
-            cmp_seg_len = cmp_segments.loc[cmp_seg_idx]["Length"]
+            cmp_seg_len = cmp_segments.loc[cmp_seg_idx]["length"]
 
             inrix_lns_matched = inrix_lines_matched_final[
                 inrix_lines_matched_final["cmp_segid"] == cmp_seg_id
@@ -1142,13 +1031,13 @@ if __name__ == "__main__":
     mt = round(ft / 3.2808, 4)
     cmp_endpoints_buffer = cmp_endpoints.copy()
     cmp_endpoints_buffer["geometry"] = cmp_endpoints_buffer.geometry.buffer(mt)
-    cmp_endpoints_buffer.to_file(
-        cmp_segments_gis_filepath + "_prj_endpoints_buffer.gpkg"
-    )
+    # cmp_endpoints_buffer.to_file(
+    #     output_dir / (output_filename_base + "-cmp_endpoints_buffer.gpkg")
+    # )
 
     # INRIX lines intersecting with cmp endpoint buffer zone
     inrix_lines_intersect_ep = gpd.sjoin(
-        inrix_network, cmp_endpoints_buffer, op="intersects"
+        inrix_network, cmp_endpoints_buffer, predicate="intersects"
     ).reset_index()
 
     # Find matching lines for zero Len_Ratio
@@ -1159,7 +1048,7 @@ if __name__ == "__main__":
             cmp_seg_buffer = cmp_segments.loc[cmp_seg_idx]["geometry"].buffer(
                 mt
             )  # Create 150ft buffer for the segment
-            cmp_seg_len = cmp_segments.loc[cmp_seg_idx]["Length"]
+            cmp_seg_len = cmp_segments.loc[cmp_seg_idx]["length"]
             cmp_b_id = cmp_segments.loc[cmp_seg_idx]["CMP_Node_B"]
             cmp_b_lat = cmp_segments.loc[cmp_seg_idx]["B_Lat"]
             cmp_b_long = cmp_segments.loc[cmp_seg_idx]["B_Long"]
@@ -1606,7 +1495,7 @@ if __name__ == "__main__":
     cmp_segments["Len_Ratio"] = np.where(
         pd.isnull(cmp_segments["Len_Matched"]),
         0,
-        cmp_segments["Len_Matched"] / cmp_segments["Length"],
+        cmp_segments["Len_Matched"] / cmp_segments["length"],
     )
     cmp_segments["Len_Ratio"] = cmp_segments["Len_Ratio"].round(1)
 
@@ -1616,7 +1505,9 @@ if __name__ == "__main__":
     inrix_lines_matched_output.columns = ["CMP_SegID", "INRIX_SegID", "Length_Matched"]
 
     # Output files
-    cmp_segments.to_file(cmp_segments_gis_filepath + "_matchedlength_check.gpkg")
+    cmp_segments.to_file(
+        output_dir / (output_filename_base + "-matchedlength_check.gpkg")
+    )
 
     inrix_lines_matched_output[["CMP_SegID", "INRIX_SegID"]] = (
         inrix_lines_matched_output[["CMP_SegID", "INRIX_SegID"]].astype(int)
