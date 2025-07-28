@@ -1,15 +1,14 @@
-import os
 import datetime as dt
-import pandas as pd
-import numpy as np
+import os
+
 import holidays
+import numpy as np
+import pandas as pd
 
 
-def get_dir(base, year=2021, data_type="station_hour", district=4):
+def get_dir(base, year=2023, data_type="station_5min", district=4):
     if data_type in ["station_hour", "station_5min", "station_meta"]:
-        return os.path.join(
-            base, "D{}_Data_{}\{}".format(district, year, data_type)
-        )
+        return os.path.join(base, "D{}_Data_{}\{}".format(district, year, data_type))
 
 
 def get_columns(data_type, num_cols):
@@ -87,19 +86,13 @@ def get_columns(data_type, num_cols):
     return columns
 
 
-
 if __name__ == "__main__":
-    # SFCTA paths
     PEMSDIR = r"Q:\Data\Observed\Streets\PeMS\CMP"
-    OUTDIR = r"Q:\CMP\LOS Monitoring 2021\PeMS\test_output"
+    OUTDIR = r"Q:\CMP\LOS Monitoring 2023\PeMS\test_output"
 
-    monitor_loc = pd.read_csv(
-        os.path.join(PEMSDIR, "pems_monitoring_locations.csv")
-    )
+    monitor_loc = pd.read_csv(os.path.join(PEMSDIR, "pems_monitoring_locations.csv"))
     stations = pd.read_csv(
-        os.path.join(
-            PEMSDIR, "D4_Data_2021\station_meta\d04_text_meta_2021_03_19.txt"
-        ),
+        os.path.join(PEMSDIR, "D4_Data_2023\station_meta\d04_text_meta_2022_12_13.txt"),
         delimiter="\t",
     )
     # PeMS stations in SF
@@ -108,9 +101,9 @@ if __name__ == "__main__":
     data_type = "station_5min"
     district = 4
     ca_holidays = holidays.UnitedStates(state="CA")
+    # remove imputed data below the percentage requirements
     obs_pct_min = 20  # Minimum observation percentage requirement
     sample_pct_min = 50  # Minimum sample percentage requirement
-
 
     unzip = False
     source = "gz"  # or 'zip','text','txt'
@@ -118,7 +111,7 @@ if __name__ == "__main__":
     data_type = "station_5min"
     sep = ","
 
-    for year in np.arange(2021, 2022):
+    for year in np.arange(2023, 2024):
         year_dfs = []
         path = get_dir(PEMSDIR, year, data_type, district)
         outpath = os.path.join(OUTDIR, "pems")
@@ -212,7 +205,7 @@ if __name__ == "__main__":
         y = pd.concat(year_dfs)
         try:
             y.to_hdf(
-                os.path.join(OUTDIR, "pems_station_hour_{}.h5".format(year)), "data"
+                os.path.join(OUTDIR, "pems_station_5min_{}.h5".format(year)), "data"
             )
         except Exception as e:
             print(e)
@@ -293,4 +286,4 @@ if __name__ == "__main__":
     )
     df_out.columns = ["loc_id", "daytype", "hour", "halfhour", "flow_avg"]
     df_out["flow_avg"] = df_out["flow_avg"].round()
-    df_out.to_csv(os.path.join(OUTDIR, "cmp2021_pems_volumes.csv"), index=False)
+    df_out.to_csv(os.path.join(OUTDIR, "cmp2023_pems_volumes.csv"), index=False)
