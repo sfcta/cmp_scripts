@@ -20,7 +20,6 @@ USAGE:
 To use the script, place the script under the same folder with input files and run with following command:
 python SF_CMP_INRIX_Network_Conflation.py
 """
-
 import argparse
 import math
 import tomllib
@@ -30,17 +29,9 @@ from pathlib import Path
 import geopandas as gpd
 import numpy as np
 import pandas as pd
-from shapely.geometry import LineString, MultiLineString, MultiPoint, Point, mapping
+from shapely.geometry import LineString, MultiLineString, MultiPoint, Point
 
 warnings.filterwarnings("ignore")
-
-# NAD 1983 StatePlane California III
-cal3 = {
-    "proj": "lcc +lat_1=37.06666666666667 +lat_2=38.43333333333333 +lat_0=36.5 +lon_0=-120.5 +x_0=2000000 +y_0=500000.0000000002",
-    "ellps": "GRS80",
-    "datum": "NAD83",
-    "no_defs": True,
-}
 
 
 def _geometry_get_start_end_vertices(linelike_geometry: LineString | MultiLineString):
@@ -86,9 +77,9 @@ if __name__ == "__main__":
     with open(args.toml_filepath, "rb") as f:
         config = tomllib.load(f)
 
+    crs = config["crs"]
     if config["mode"] not in {"monthly", "biennial"}:
         raise NotImplementedError
-
     inrix_map_version = config["inrix_map_version"]
     inrix_sf_network_gis_filepath = Path(config["input_gis_filepath"]["dir"]) / config[
         "input_gis_filepath"
@@ -108,9 +99,8 @@ if __name__ == "__main__":
         + ".csv"
     )
 
-    # Convert original coordinate system to California III state plane
     # CMP network
-    cmp_segments = gpd.read_file(cmp_segments_gis_filepath).to_crs(cal3)
+    cmp_segments = gpd.read_file(cmp_segments_gis_filepath).to_crs(crs)
     cmp_segments["cmp_name"] = cmp_segments["cmp_name"].str.replace("/ ", "/")
     # replace length column in CMP segments (mi) GIS file with length in the CRS unit
     cmp_segments["length"] = cmp_segments.geometry.length
@@ -118,7 +108,7 @@ if __name__ == "__main__":
 
     # INRIX XD network
     # HOTFIX, leaving this hardcoded for now
-    inrix_network = gpd.read_file(inrix_sf_network_gis_filepath).to_crs(cal3)
+    inrix_network = gpd.read_file(inrix_sf_network_gis_filepath).to_crs(crs)
     inrix_network["length"] = inrix_network.geometry.length
     inrix_network["length"] = inrix_network["length"] * 3.2808  # meters to feet
     inrix_network["SegID"] = inrix_network[inrix_segid_col].astype(int)
