@@ -617,14 +617,6 @@ def calculate_transit_speed_and_reliability(
     year,
     output_dir,
 ):
-    """Calculate transit speed and reliability"""
-    # Define WGS 1984 coordinate system
-    wgs84 = {
-        "proj": "longlat",
-        "ellps": "WGS84",
-        "datum": "WGS84",
-        "no_defs": True,
-    }
     # Define NAD 1983 StatePlane California III
     cal3 = {
         "proj": "lcc +lat_1=37.06666666666667 +lat_2=38.43333333333333 +lat_0=36.5 +lon_0=-120.5 +x_0=2000000 +y_0=500000.0000000002",
@@ -650,6 +642,123 @@ def calculate_transit_speed_and_reliability(
         "&", expand=True
     )  # split stop name into operating street and intersecting street
 
+    stops_near_cmp_list, cmp_segs_near = find_stops_near_cmp_segments(
+        stops, cmp_segments_gdf, inrix_network_gdf, cmp_inrix_correspondence, year
+    )
+
+    apc_cmp = (
+        pl.from_pandas(apc_notnull)
+        .filter(
+            (
+                (pl.col("DOW") > 1) & (pl.col("DOW") < 5)  # only Tue, Wed, Thu
+                # CMP monitoring months (if required):
+                # & ((pl.col("Month") == 4) | (pl.col("Month") == 5))
+            )
+        )
+        .with_columns(
+            pl.col("Date").dt.day().alias("Day"),
+            (
+                pl.col("Open_Hour")
+                + pl.col("Open_Minute") / 60
+                + pl.col("Open_Second") / 3600
+            ).alias("Open_Time_float"),
+            (
+                pl.col("Close_Hour")
+                + pl.col("Close_Minute") / 60
+                + pl.col("Close_Second") / 3600
+            ).alias("Close_Time_float"),
+        )
+    ).to_pandas()
+
+    # # Match AM&PM transit stops to CMP segments
+    angle_thrd = 10
+
+    # ## AM
+    apc_cmp_am = apc_cmp[(apc_cmp["Open_Hour"] < 9) & (apc_cmp["Close_Hour"] > 6)]
+    apc_cmp_am = apc_cmp_am.merge(
+        stops, left_on="BS_ID", right_on="stop_id", how="left"
+    )
+    apc_cmp_am = apc_cmp_am.sort_values(
+        by=["TRIP_ID_EXTERNAL", "Date", "VEHICLE_ID", "Open_Time"]
+    ).reset_index()
+
+    print("------------Start processing AM trips------------")
+    apc_pairs_am = match_stop_pairs_to_cmp(
+        apc_cmp_am,
+        stops_near_cmp_list,
+        cmp_segs_near,
+        cmp_segments_gdf,
+        angle_thrd,
+    )
+
+    # ## PM
+    apc_cmp_pm = apc_cmp[
+        (apc_cmp["Open_Time_float"] <= 18.5) & (apc_cmp["Close_Time_float"] >= 16.5)
+    ]
+
+    apc_cmp_pm = apc_cmp_pm.merge(
+        stops, left_on="BS_ID", right_on="stop_id", how="left"
+    )
+    apc_cmp_pm = apc_cmp_pm.sort_values(
+        by=["TRIP_ID_EXTERNAL", "Date", "VEHICLE_ID", "Open_Time"]
+    ).reset_index()
+
+    print("------------Start processing PM trips------------")
+    apc_pairs_pm = match_stop_pairs_to_cmp(
+        apc_cmp_pm,
+        stops_near_cmp_list,
+        cmp_segs_near,
+        cmp_segments_gdf,
+        angle_thrd,
+    )
+
+    # Transit Speeds on CMP Segment
+    # AM
+    apc_cmp_speeds_am = match_intermediate_apc_stops(
+        apc_pairs_am,
+        apc_cmp_am,
+        overlap_pairs,
+        cmp_segments_gdf,
+        "AM",
+        year,
+        output_dir,
+    )
+
+    # PM
+    apc_cmp_speeds_pm = match_intermediate_apc_stops(
+        apc_pairs_pm,
+        apc_cmp_pm,
+        overlap_pairs,
+        cmp_segments_gdf,
+        "PM",
+        year,
+        output_dir,
+    )
+
+    # Combine AM and PM
+    apc_cmp_speeds = pd.concat(
+        (apc_cmp_speeds_am, apc_cmp_speeds_pm), ignore_index=True
+    )
+    apc_cmp_speeds = apc_cmp_speeds[apc_cmp_speeds["sample_size"] >= 9]
+    print("Number of segment-periods ", len(apc_cmp_speeds))
+
+    out_cols = [
+        "cmp_segid",
+        "year",
+        "source",
+        "period",
+        "avg_speed",
+        "std_dev",
+        "cov",
+        "sample_size",
+        "comment",
+    ]
+    return apc_cmp_speeds[out_cols]
+
+
+def find_stops_near_cmp_segments(
+    stops, cmp_segments_gdf, inrix_network_gdf, cmp_inrix_correspondence, year
+):
     # Create a buffer zone for each cmp segment
     ft = 160  # According to the memo from last CMP cycle
     mt = round(ft / 3.2808, 4)
@@ -721,7 +830,7 @@ def calculate_transit_speed_and_reliability(
                     stops.loc[stop_idx, "near_dis"] = near_dis
 
     stops_near_cmp = stops[stops["near_cmp"] == 1]
-    stops_near_cmp = stops_near_cmp.to_crs(wgs84)
+    stops_near_cmp = stops_near_cmp.to_crs("EPSG:4326")  # WGS84
 
     stops_near_cmp_list = stops_near_cmp["stop_id"].unique().tolist()
 
@@ -753,114 +862,7 @@ def calculate_transit_speed_and_reliability(
         if len(remove_df_idx) > 0:
             cmp_segs_near = cmp_segs_near.drop([remove_df_idx[0]], axis=0)
 
-    apc_cmp = (
-        pl.from_pandas(apc_notnull)
-        .filter(
-            (
-                (pl.col("DOW") > 1) & (pl.col("DOW") < 5)  # only Tue, Wed, Thu
-                # CMP monitoring months (if required):
-                # & ((pl.col("Month") == 4) | (pl.col("Month") == 5))
-            )
-        )
-        .with_columns(
-            pl.col("Date").dt.day().alias("Day"),
-            (
-                pl.col("Open_Hour")
-                + pl.col("Open_Minute") / 60
-                + pl.col("Open_Second") / 3600
-            ).alias("Open_Time_float"),
-            (
-                pl.col("Close_Hour")
-                + pl.col("Close_Minute") / 60
-                + pl.col("Close_Second") / 3600
-            ).alias("Close_Time_float"),
-        )
-    ).to_pandas()
-
-    # # Match AM&PM transit stops to CMP segments
-    angle_thrd = 10
-
-    # ## AM
-    apc_cmp_am = apc_cmp[(apc_cmp["Open_Hour"] < 9) & (apc_cmp["Close_Hour"] > 6)]
-    apc_cmp_am = apc_cmp_am.merge(
-        stops, left_on="BS_ID", right_on="stop_id", how="left"
-    )
-    apc_cmp_am = apc_cmp_am.sort_values(
-        by=["TRIP_ID_EXTERNAL", "Date", "VEHICLE_ID", "Open_Time"]
-    ).reset_index()
-
-    print("------------Start processing AM trips------------")
-    apc_pairs_am = match_stop_pairs_to_cmp(
-        apc_cmp_am,
-        stops_near_cmp_list,
-        cmp_segs_near,
-        cmp_segments_gdf,
-        angle_thrd,
-    )
-
-    # ## PM
-    apc_cmp_pm = apc_cmp[
-        (apc_cmp["Open_Time_float"] <= 18.5) & (apc_cmp["Close_Time_float"] >= 16.5)
-    ]
-
-    apc_cmp_pm = apc_cmp_pm.merge(
-        stops, left_on="BS_ID", right_on="stop_id", how="left"
-    )
-    apc_cmp_pm = apc_cmp_pm.sort_values(
-        by=["TRIP_ID_EXTERNAL", "Date", "VEHICLE_ID", "Open_Time"]
-    ).reset_index()
-
-    print("------------Start processing PM trips------------")
-    apc_pairs_pm = match_stop_pairs_to_cmp(
-        apc_cmp_pm,
-        stops_near_cmp_list,
-        cmp_segs_near,
-        cmp_segments_gdf,
-        angle_thrd,
-    )
-
-    # Transit Speeds on CMP Segment
-    # ## AM
-    apc_cmp_speeds_am = match_intermediate_apc_stops(
-        apc_pairs_am,
-        apc_cmp_am,
-        overlap_pairs,
-        cmp_segments_gdf,
-        "AM",
-        year,
-        output_dir,
-    )
-
-    # ## PM
-    apc_cmp_speeds_pm = match_intermediate_apc_stops(
-        apc_pairs_pm,
-        apc_cmp_pm,
-        overlap_pairs,
-        cmp_segments_gdf,
-        "PM",
-        year,
-        output_dir,
-    )
-
-    # ## Combine AM and PM
-    apc_cmp_speeds = pd.concat(
-        (apc_cmp_speeds_am, apc_cmp_speeds_pm), ignore_index=True
-    )
-    apc_cmp_speeds = apc_cmp_speeds[apc_cmp_speeds["sample_size"] >= 9]
-    print("Number of segment-periods ", len(apc_cmp_speeds))
-
-    out_cols = [
-        "cmp_segid",
-        "year",
-        "source",
-        "period",
-        "avg_speed",
-        "std_dev",
-        "cov",
-        "sample_size",
-        "comment",
-    ]
-    return apc_cmp_speeds[out_cols]
+    return (stops_near_cmp_list, cmp_segs_near)
 
 
 def create_apc_notnull(apc_df):
@@ -944,7 +946,9 @@ def transit_volume_and_speed(config):
 
     # Read in transit APC data
     apc_dfs = (
-        pl.scan_csv(Path(config["apc_directory"]) / f, dtypes={"ROUTE_ALPHA": pl.Utf8})
+        pl.scan_csv(
+            Path(config["apc_directory"]) / f, schema_overrides={"ROUTE_ALPHA": pl.Utf8}
+        )
         for f in config["apc_filenames"]
     )
     apc_df = pl.concat(apc_dfs, how="vertical", rechunk=False)
