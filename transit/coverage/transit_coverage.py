@@ -49,9 +49,7 @@ def read_shapes(gtfs_dir: Path | str, service_id: str | int):
     shp_ids = shapes.shape_id.unique()
     linestrs = []
     for shp_id in shp_ids:
-        shp = shapes[shapes["shape_id"] == shp_id].sort_values(
-            by="shape_pt_sequence"
-        )
+        shp = shapes[shapes["shape_id"] == shp_id].sort_values(by="shape_pt_sequence")
         linestrs.append(LineString(zip(shp.shape_pt_lon, shp.shape_pt_lat)))
     shapes_gdf = gpd.GeoDataFrame(
         {"shape_id": shp_ids, "geometry": linestrs}, crs="EPSG:4326"
@@ -105,9 +103,7 @@ def filter_trips_by_time(
     )
     trips_hour = pd.merge(
         trips,
-        stop_times[start_stops_idx][
-            ["trip_id", "arrival_time", "departure_time"]
-        ],
+        stop_times[start_stops_idx][["trip_id", "arrival_time", "departure_time"]],
         on="trip_id",
         how="left",
     )
@@ -163,9 +159,7 @@ def frequent_routes(
         route_frequent_shapes = route_frequent.merge(
             trips_shapes_mcv, on=period_cols, how="left"
         )
-        route_frequent_shapes = trips_shapes.merge(
-            route_frequent_shapes, on="shape_id"
-        )
+        route_frequent_shapes = trips_shapes.merge(route_frequent_shapes, on="shape_id")
         route_frequent_shapes = route_frequent_shapes.merge(
             routes, on="route_id", how="left"
         )
@@ -225,9 +219,7 @@ def frequent_stops(
         stop_route_period.groupby(stop_cols).trip_id.count().reset_index()
     )
     stop_period_counts.columns = stop_cols + ["total_trips"]
-    stop_frequent = stop_period_counts[
-        stop_period_counts["total_trips"] >= min_trips
-    ]
+    stop_frequent = stop_period_counts[stop_period_counts["total_trips"] >= min_trips]
 
     if len(stop_frequent):  # if len > 0
         stop_frequent_list = stop_frequent.stop_id.unique().tolist()
@@ -277,18 +269,14 @@ def frequent_bus_routes(
 
     for rec in COMBINE_ROUTES:
         route_ids = list(
-            routes.loc[
-                routes["route_short_name"].isin(rec[0]), "route_id"
-            ].values
+            routes.loc[routes["route_short_name"].isin(rec[0]), "route_id"].values
         )
         if len(route_ids) > 0:
             new_id = route_ids[0]
-            routes.loc[
-                routes["route_short_name"].isin(rec[0]), "route_id"
-            ] = new_id
-            routes.loc[
-                routes["route_short_name"].isin(rec[0]), "route_short_name"
-            ] = rec[1]
+            routes.loc[routes["route_short_name"].isin(rec[0]), "route_id"] = new_id
+            routes.loc[routes["route_short_name"].isin(rec[0]), "route_short_name"] = (
+                rec[1]
+            )
 
             trips.loc[trips["route_id"].isin(route_ids), "route_id"] = new_id
 
@@ -378,14 +366,10 @@ def endnotes_from_streets(streets_gdf):
     e_nodes = streets_gdf[["E_Lat", "E_Long"]]
     e_nodes.columns = ["Lat", "Long"]
 
-    streets_endnodes = pd.concat(
-        (b_nodes, e_nodes), ignore_index=True
-    ).reset_index()
+    streets_endnodes = pd.concat((b_nodes, e_nodes), ignore_index=True).reset_index()
 
     # Assign unique node id
-    endnodes_cnt = (
-        streets_endnodes.groupby(["Lat", "Long"]).index.count().reset_index()
-    )
+    endnodes_cnt = streets_endnodes.groupby(["Lat", "Long"]).index.count().reset_index()
     endnodes_cnt.rename(columns={"index": "NodeCnt"}, inplace=True)
     endnodes_cnt["NodeID"] = endnodes_cnt.index + 1
 
@@ -399,23 +383,15 @@ def endnotes_from_streets(streets_gdf):
 
     endnodes_cnt = endnodes_cnt[["Lat", "Long", "NodeCnt", "NodeID"]]
     endnodes_cnt.columns = ["B_Lat", "B_Long", "B_NodeCnt", "B_NodeID"]
-    streets_gdf = streets_gdf.merge(
-        endnodes_cnt, on=["B_Lat", "B_Long"], how="left"
-    )
+    streets_gdf = streets_gdf.merge(endnodes_cnt, on=["B_Lat", "B_Long"], how="left")
 
     endnodes_cnt.columns = ["E_Lat", "E_Long", "E_NodeCnt", "E_NodeID"]
-    streets_gdf = streets_gdf.merge(
-        endnodes_cnt, on=["E_Lat", "E_Long"], how="left"
-    )
+    streets_gdf = streets_gdf.merge(endnodes_cnt, on=["E_Lat", "E_Long"], how="left")
     endnodes_cnt.columns = ["Lat", "Long", "NodeCnt", "NodeID"]
 
     streets_gdf["length"] = streets_gdf.geometry.length
-    streets_gdf["b_e"] = list(
-        zip(streets_gdf["B_NodeID"], streets_gdf["E_NodeID"])
-    )
-    streets_gdf["e_b"] = list(
-        zip(streets_gdf["E_NodeID"], streets_gdf["B_NodeID"])
-    )
+    streets_gdf["b_e"] = list(zip(streets_gdf["B_NodeID"], streets_gdf["E_NodeID"]))
+    streets_gdf["e_b"] = list(zip(streets_gdf["E_NodeID"], streets_gdf["B_NodeID"]))
     # Save the updated street shapefile with endnodes
     # outcols = [c for c in streets.columns.tolist() if c not in ['b_e', 'e_b']]
     # streets[outcols].to_file(os.path.join(Streets_Dir, 'streets_with_endnodes.gpkg'))
@@ -424,9 +400,7 @@ def endnotes_from_streets(streets_gdf):
 
 
 def build_walking_network(stops, streets_gdf, sf_boundary_gdf, endnodes_cnt):
-    stops_within_sf = stops.sjoin(
-        sf_boundary_gdf, predicate="within"
-    ).reset_index()
+    stops_within_sf = stops.sjoin(sf_boundary_gdf, predicate="within").reset_index()
     stops_within_sf = stops_within_sf[stops.columns]
     stops_within_sf.insert(
         0,
@@ -480,17 +454,13 @@ def build_walking_network(stops, streets_gdf, sf_boundary_gdf, endnodes_cnt):
     return stops_within_sf, stop_near_links, tgraph
 
 
-def stop_walking_area(
-    streets_gdf, walk_graph, walk_dis, start_node, link_near_stop
-):
+def stop_walking_area(streets_gdf, walk_graph, walk_dis, start_node, link_near_stop):
     cur_path = dict(
         nx.single_source_dijkstra_path(
             walk_graph, start_node, cutoff=walk_dis, weight="weight"
         )
     )
-    del cur_path[
-        start_node
-    ]  # TODO definitely should not have del in production code
+    del cur_path[start_node]  # TODO definitely should not have del in production code
     reach_links = {}
     for key in cur_path:
         sub_path = list(zip(cur_path[key][:-1], cur_path[key][1:]))
@@ -672,18 +642,16 @@ def calculate_coverage(
                 crs,
                 min_intersect_area_prop,
             )
-            maz_gdf.loc[
-                maz_gdf["MAZID"].isin(geo_ids), ["MAZID", "geometry"]
-            ].to_crs("EPSG:4326").to_file(
+            maz_gdf.loc[maz_gdf["MAZID"].isin(geo_ids), ["MAZID", "geometry"]].to_crs(
+                "EPSG:4326"
+            ).to_file(
                 os.path.join(
                     output_dir,
                     f"coverage_{output_tag}_{gtfs_year}_{peak_period}buffer.gpkg",
                 )
             )
 
-            coverage_df.loc[idx, "cover_pop"] = frequent_access_geo_attrs[
-                "pop_p"
-            ].sum()
+            coverage_df.loc[idx, "cover_pop"] = frequent_access_geo_attrs["pop_p"].sum()
             coverage_df.loc[idx, "cover_jobs"] = frequent_access_geo_attrs[
                 "emptot_p"
             ].sum()
@@ -693,15 +661,11 @@ def calculate_coverage(
         coverage_df.loc[idx, "tot_pop"] = geo_data["pop_p"].sum()
         coverage_df.loc[idx, "tot_jobs"] = geo_data["emptot_p"].sum()
         coverage_df.loc[idx, "cover_pop_pct"] = round(
-            100
-            * coverage_df.loc[idx, "cover_pop"]
-            / coverage_df.loc[idx, "tot_pop"],
+            100 * coverage_df.loc[idx, "cover_pop"] / coverage_df.loc[idx, "tot_pop"],
             2,
         )
         coverage_df.loc[idx, "cover_jobs_pct"] = round(
-            100
-            * coverage_df.loc[idx, "cover_jobs"]
-            / coverage_df.loc[idx, "tot_jobs"],
+            100 * coverage_df.loc[idx, "cover_jobs"] / coverage_df.loc[idx, "tot_jobs"],
             2,
         )
         idx += 1
