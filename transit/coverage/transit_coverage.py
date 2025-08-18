@@ -11,16 +11,17 @@ from shapely import geometry
 from shapely.geometry import LineString, Point
 
 CRS_TOML = "crs.toml"
-COUNTIES_BOUNDARIES_GIS_FILEPATH = "Q:\GIS\Boundaries\Counties\Counties.shp"
+COUNTIES_BOUNDARIES_GIS_FILEPATH = "Q:/GIS/Boundaries/Counties/Counties.shp"
 COUNTIES_BOUNDARIES_GIS_CRS = "EPSG:2227"
 
 
 def read_gtfs_txt(gtfs_dir: Path | str, filename: str):
+    gtfs_dir = Path(gtfs_dir)
     if gtfs_dir.suffix == ".zip":
         with ZipFile(gtfs_dir, "r") as z:
             return pd.read_csv(z.open(filename))
     else:
-        return pd.read_csv(Path(gtfs_dir) / filename)
+        return pd.read_csv(gtfs_dir / filename)
 
 
 def read_stops(gtfs_dir, to_crs):
