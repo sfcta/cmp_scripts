@@ -1,0 +1,16 @@
+apc_directory = "Q:/Data/Observed/Transit/Muni/APC/2025/parsed"
+apc_filenames = ["OrbCAD_dbo_apc_correlated_2025_AprMay.parquet"]
+# HOTFIX named -geo.parquet to differentiate it from non-geo parquet
+# otherwise reading the geoparquet into polars would throw error
+stops_filename = "bus_stops-geo.parquet"
+# TODO not sure how to generate this postprocessing file at all,
+# thus keep using 2022 one
+postprocessing_overlap_pairs_filepath = "Q:/CMP/LOS Monitoring 2023/transit/volume_and_speed/2304-2305/inputs/postprocessing-overlapping_transit_segments_2023.csv"
+cmp_plus_GIS_filepath = "Q:/CMP/LOS Monitoring 2021/CMP_plus_shp/old_cmp_plus/cmp_segments_plus.shp"
+inrix_network_GIS_filepath = "Q:/GIS/Transportation/Roads/INRIX/XD/21_01/maprelease-shapefiles/SF/Inrix_XD_2101_SF_manualedit.shp"
+cmp_inrix_network_conflation_filepath = "Q:/CMP/LOS Monitoring 2021/Network_Conflation/CMP_Segment_INRIX_Links_Correspondence_2101_Manual_PLUS_Updated.csv"
+output_directory = "Q:/CMP/LOS Monitoring 2025/transit/volume_and_speed/2504-2505/"
+year = 2025
+
+[cmp_segments]
+exempt = [237, 245]
