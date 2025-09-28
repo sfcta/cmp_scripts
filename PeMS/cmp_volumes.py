@@ -1,14 +1,22 @@
 import datetime as dt
 import os
-
+import sys
 import holidays
 import numpy as np
 import pandas as pd
+from pathlib import Path
+import argparse
+import re
+
+try:
+    import tomllib as toml   # Python 3.11+
+except ImportError:
+    import toml
 
 
 def get_dir(base, year=2023, data_type="station_5min", district=4):
     if data_type in ["station_hour", "station_5min", "station_meta"]:
-        return os.path.join(base, "D{}_Data_{}\{}".format(district, year, data_type))
+        return os.path.join(base, "D{}_Data_{}/{}".format(district, year, data_type))
 
 
 def get_columns(data_type, num_cols):
@@ -86,19 +94,50 @@ def get_columns(data_type, num_cols):
     return columns
 
 
-if __name__ == "__main__":
-    PEMSDIR = r"Q:\Data\Observed\Streets\PeMS\CMP"
-    OUTDIR = r"Q:\CMP\LOS Monitoring 2023\PeMS\test_output"
-
-    monitor_loc = pd.read_csv(os.path.join(PEMSDIR, "pems_monitoring_locations.csv"))
-    stations = pd.read_csv(
-        os.path.join(PEMSDIR, "D4_Data_2023\station_meta\d04_text_meta_2022_12_13.txt"),
-        delimiter="\t",
+def parse_args():
+    p = argparse.ArgumentParser(
+        description="Process PeMS volumes with a TOML config."
     )
+    p.add_argument(
+        "config",
+        nargs="?", 
+        help="Path to the TOML config file",
+        default=os.path.join(os.path.dirname(__file__), "config.toml")
+    )
+    return p.parse_args()
+
+
+
+if __name__ == "__main__":
+    # 1) parse command‐line and load cfg
+    args = parse_args()
+    cfg_path = args.config
+
+    with open(cfg_path, "rb") as f:
+        cfg = toml.load(f)
+
+    # 2) re-bind your key variables from the TOML
+    YEAR    = cfg["processing"]["YEAR"]
+    PEMSDIR = cfg["paths"]["PEMSDIR"]
+    OUTDIR_TPL  = cfg["paths"]["OUTDIR"]
+    save_h5     = cfg["processing"].get("save_h5", False)
+
+    # If you have other values in your TOML (like file names), pull those too:
+    META_FILE = cfg["files"]["stations_meta_file"]
+    monitor_loc = cfg["files"]["monitor_meta_file"]
+    OUT_CSV_TPL   = cfg["output"]["df_out_meta_file"]
+
+    # 3) create variables and directories based on the cfg values
+    meta_station_path = (Path(PEMSDIR) / META_FILE)
+    stations = pd.read_csv(meta_station_path, delimiter="\t")
+
+    # monitor location dataframe
+    df_monitor = pd.read_csv(monitor_loc)
+
     # PeMS stations in SF
     sf_stations = stations[stations["County"] == 75]
 
-    data_type = "station_5min"
+    data_type = cfg["processing"]["data_type"]
     district = 4
     ca_holidays = holidays.UnitedStates(state="CA")
     # remove imputed data below the percentage requirements
@@ -107,25 +146,31 @@ if __name__ == "__main__":
 
     unzip = False
     source = "gz"  # or 'zip','text','txt'
-    save_h5 = True
-    data_type = "station_5min"
     sep = ","
 
-    for year in np.arange(2023, 2024):
+    for YEAR in ([YEAR] if isinstance(YEAR, int) else list(YEAR)):
+        OUTDIR = Path(OUTDIR_TPL.format(YEAR=YEAR))
+        os.makedirs(OUTDIR, exist_ok=True)
+        
+        OUT_CSV = OUT_CSV_TPL.format(YEAR=YEAR)
+        
         year_dfs = []
-        path = get_dir(PEMSDIR, year, data_type, district)
-        outpath = os.path.join(OUTDIR, "pems")
+        path = get_dir(PEMSDIR, YEAR, data_type, district)
         contents = os.listdir(path)
-        gzs = filter(lambda x: os.path.splitext(x)[1] == ".gz", contents)
-        txts = filter(lambda x: os.path.splitext(x)[1] == ".txt", contents)
-
+        
         if source == "gz":
-            files = gzs
+            # 1) pick out only the .gz files
+            gz_files = [f for f in contents if f.endswith(".gz")]
+            # 2) build a regex that matches "_<YEAR>_04_<DD>.txt.gz" or "_<YEAR>_05_<DD>.txt.gz"
+            month_re = re.compile(rf"_{YEAR:04d}_(0[45])_\d{{2}}\.txt\.gz$")
+            # 3) filter them
+            files = [f for f in gz_files if month_re.search(f)]
             compression = "gzip"
         else:
-            files = txts
+            # pick plain .txt files (no date filtering)
+            files = [f for f in contents if f.endswith(".txt")]
             compression = None
-
+    
         header = 0 if data_type == "station_meta" else None
 
         for f in files:
@@ -137,7 +182,6 @@ if __name__ == "__main__":
                     header=header,
                     index_col=False,
                     parse_dates=[0],
-                    infer_datetime_format=True,
                     compression=compression,
                 )
             except Exception as e:
@@ -150,7 +194,6 @@ if __name__ == "__main__":
                         header=header,
                         index_col=False,
                         parse_dates=[0],
-                        infer_datetime_format=True,
                         quotechar=None,
                         compression=compression,
                     )
@@ -203,15 +246,17 @@ if __name__ == "__main__":
                 year_dfs.append(df)
 
         y = pd.concat(year_dfs)
-        try:
-            y.to_hdf(
-                os.path.join(OUTDIR, "pems_station_5min_{}.h5".format(year)), "data"
-            )
-        except Exception as e:
-            print(e)
+        if save_h5:
+            print("HDF writing...")
+            try:
+                y.to_hdf(
+                    os.path.join(OUTDIR, "pems_station_5min_{}.h5".format(YEAR)), "data", mode = "w"
+                )
+            except Exception as e:
+                print("HDF write failed:", e)
 
     # PeMS counts in SF
-    sf_counts = y[y["station"].isin(sf_stations["ID"])]
+    sf_counts = y[y["station"].isin(sf_stations["ID"])].copy()
     # Get half hour period
     sf_counts["halfhour"] = np.where(sf_counts["minute"] < 30, 0, 30)
     # Aggregate from 5-min to half hour
@@ -278,7 +323,7 @@ if __name__ == "__main__":
     df_agg.columns = groupby_cols + ["flow_avg", "flow_count", "flow_std"]
 
     # Aggregate from individual stations to monitoring locations
-    df_agg = df_agg.merge(monitor_loc, on="station")
+    df_agg = df_agg.merge(df_monitor, on="station")
     df_out = (
         df_agg.groupby(["loc_id", "daytype", "hour", "halfhour"])
         .flow_avg.mean()
@@ -286,4 +331,4 @@ if __name__ == "__main__":
     )
     df_out.columns = ["loc_id", "daytype", "hour", "halfhour", "flow_avg"]
     df_out["flow_avg"] = df_out["flow_avg"].round()
-    df_out.to_csv(os.path.join(OUTDIR, "cmp2023_pems_volumes.csv"), index=False)
+    df_out.to_csv(os.path.join(OUTDIR, OUT_CSV), index=False, encoding = "utf-8")
