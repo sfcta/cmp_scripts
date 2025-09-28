@@ -1,0 +1,19 @@
+[processing]
+# change YEAR to the current year you are working on
+YEAR    = 2024
+data_type  = "station_5min"
+save_h5 = false
+
+[paths]
+PEMSDIR = "Q:/Data/Observed/Streets/PeMS/D4"
+OUTDIR = "Q:/CMP/LOS Monitoring {YEAR}/PeMS/test_output"
+
+
+[files]
+# remember to change the stations_meta_file you downloaded for every year, notice that it is "d04xxxx.txt" rather than "d4xxxx.txt"
+stations_meta_file = "D4_Data_2024/station_meta/d04_text_meta_2024_05_18.txt"
+
+monitor_meta_file = "Q:/Data/Observed/Streets/PeMS/CMP/pems_monitoring_locations.csv"
+
+[output]
+df_out_meta_file = "cmp{YEAR}_pems_volumes.csv"
