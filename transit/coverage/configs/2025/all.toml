@@ -1,0 +1,20 @@
+[GTFS]
+DIR = "Q:/Data/GTFS/Muni/2020s/2025/SFMTA_GTFS_20250426_20250620v1.zip"
+SERVICE_ID = 1  # from calendar.txt
+YEAR = 2025
+
+[STREETS]
+SHAPEFILE = "Q:/CMP/LOS Monitoring 2021/Transit/Coverage/champ_hwy_shapefile/champ_freeflow.shp"
+
+[ZONES]
+SHAPEFILE = "Q:/GIS/Model/MAZ/MAZ40051.shp"
+DATAFILE = "Y:/champ/landuse/y2023/y2023_sftpp_20241015/4-Daysim/maz_stline_buffer.dat"
+
+[PARAMS]
+MIN_TRIPS = 1  # any headway
+BUFFER_RAD_MI = 0.25
+MIN_INTERSECT_AREA = 0.33
+
+[OUTPUT]
+DIR = "Q:/CMP/LOS Monitoring 2025/transit/coverage/2025/all"
+TAG = "all"
