@@ -8,7 +8,7 @@ import geopandas as gpd
 import networkx as nx
 import pandas as pd
 from shapely import geometry
-from shapely.geometry import LineString, Point
+from shapely.geometry import LineString
 
 CRS_TOML = "crs.toml"
 COUNTIES_BOUNDARIES_GIS_FILEPATH = "Q:/GIS/Boundaries/Counties/Counties.shp"
@@ -262,7 +262,7 @@ def frequent_bus_routes(
         begin_time = "16:30:00"
         end_time = "18:30:00"
     else:
-        print("peak_period needs to be either AM or PM")
+        raise RuntimeError("peak_period needs to be either AM or PM")
 
     routes = read_routes(gtfs_dir)
     trips, trips_shapes = read_shapes(gtfs_dir, service_id)
@@ -282,6 +282,11 @@ def frequent_bus_routes(
             trips.loc[trips["route_id"].isin(route_ids), "route_id"] = new_id
 
     period_cols = ["route_id", "direction_id"]
+
+    # TODO update logic: perhaps you should find the frequency of a bus line (or bus
+    # line series like 9/9R) directly FOR EACH STOP, instead of just using the most
+    # common routing of each line
+
     # There may be multiples shapes for the same route, so here the most frequent shape is used for each route_id
     trips_shapes_mcv = (
         trips.groupby(period_cols)["shape_id"]
@@ -634,7 +639,7 @@ def calculate_coverage(
                 )
             )
             frequent_stops_access_union = (
-                frequent_stops_access_area.geometry.unary_union
+                frequent_stops_access_area.geometry.union_all()
             )
             frequent_access_geo_attrs, geo_ids = frequent_stops_access_geo(
                 maz_gdf,
