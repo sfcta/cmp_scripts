@@ -130,7 +130,7 @@ def match_intermediate_apc_stops(
                 cur_stop_veh_id = apc_cmp.loc[cur_stop_trip_idx, "vehicle_id"]
                 cur_stop_route_alpha = apc_cmp.loc[cur_stop_trip_idx, "route_alpha"]
                 cur_stop_route_dir = apc_cmp.loc[cur_stop_trip_idx, "direction_code_id"]
-                cur_stop_open_time = apc_cmp.loc[cur_stop_trip_idx, "open_date_time "]
+                cur_stop_open_time = apc_cmp.loc[cur_stop_trip_idx, "open_date_time"]
                 cur_stop_close_time = apc_cmp.loc[cur_stop_trip_idx, "close_date_time"]
                 cur_stop_dwell_time = apc_cmp.loc[cur_stop_trip_idx, "dwell_time"]
 

@@ -5,10 +5,10 @@ apc_filenames = ["OrbCAD_dbo_apc_correlated_2025_AprMay.parquet"]
 stops_filename = "bus_stops-geo.parquet"
 # TODO not sure how to generate this postprocessing file at all,
 # thus keep using 2022 one
-postprocessing_overlap_pairs_filepath = "Q:/CMP/LOS Monitoring 2023/transit/volume_and_speed/2304-2305/inputs/postprocessing-overlapping_transit_segments_2023.csv"
-cmp_plus_GIS_filepath = "Q:/CMP/LOS Monitoring 2021/CMP_plus_shp/old_cmp_plus/cmp_segments_plus.shp"
-inrix_network_GIS_filepath = "Q:/GIS/Transportation/Roads/INRIX/XD/21_01/maprelease-shapefiles/SF/Inrix_XD_2101_SF_manualedit.shp"
-cmp_inrix_network_conflation_filepath = "Q:/CMP/LOS Monitoring 2021/Network_Conflation/CMP_Segment_INRIX_Links_Correspondence_2101_Manual_PLUS_Updated.csv"
+postprocessing_overlap_pairs_filepath = "Q:/CMP/LOS Monitoring 2025/transit/volume_and_speed/2504-2505/inputs/manual_overlapping_segments.csv"
+cmp_plus_GIS_filepath = "Q:/GIS/Transportation/Roads/CMP/cmp_roadway_segments.shp"
+inrix_network_GIS_filepath = "Q:/GIS/Transportation/Roads/INRIX/XD/2501/shapefile/INRIX_XD-SF-2501.shp"
+cmp_inrix_network_conflation_filepath = "Q:/CMP/LOS Monitoring 2025/Network_Conflation/v2501/CMP_Segment_INRIX_Links_Correspondence_2501_Manual-expandednetwork.csv"
 output_directory = "Q:/CMP/LOS Monitoring 2025/transit/volume_and_speed/2504-2505/"
 year = 2025
 
