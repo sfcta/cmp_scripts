@@ -4,6 +4,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import polars as pl
+import datetime as dt
 from openpyxl import load_workbook
 
 
@@ -18,6 +19,31 @@ def read_day_dir_dayofweek(workbook, sheet_name, day_num):
     else:
         return date.split(" ")[0]
 
+def read_date(workbook, sheet_name, day_num):
+    row = 8 + day_num * 48
+    date = workbook[sheet_name][f"D{row}"].value
+    if date is None:
+        raise EOFError(
+            "No data here; day_num is probably beyond "
+            "the number of days collected at this location."
+        )
+    else:
+        print(date)
+        _month_str, _day_str, _year_str = date.split(" ")[1:]
+        return dt.datetime(year=int(_year_str),
+                           month={'jan':1,
+                                 'feb':2,
+                                 'mar':3,
+                                 'apr':4,
+                                 'may':5,
+                                 'jun':6,
+                                 'jul':7,
+                                 'aug':8,
+                                 'sep':9,
+                                 'oct':10,
+                                 'nov':11,
+                                 'dec':12}[_month_str.lower()[0:3]],
+                           day=int(_day_str.replace(',','')))
 
 def is_weekday(dayofweek: str):
     if dayofweek in {"MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY"}:
@@ -195,6 +221,92 @@ def read_totals(filepath, workbook, sheet_name, direction, dow_mode):
             break
     return am_peak_totals, pm_peak_totals, daily_totals
 
+def excels_to_csv(xlsx_filepaths, location_filepath, output_csv_filepath_stem, dow_mode):
+    output_csv_filepath = f"{output_csv_filepath_stem}-{dow_mode}-flat.csv"
+    df = read_excels_to_flat_df(xlsx_filepaths, dow_mode).reset_index() # b/c indexed on TIME
+    df = join_location_metadata(df, location_filepath)
+    df.to_csv(output_csv_filepath, index=False)
+
+def read_excels_to_flat_df(xlsx_filepaths, dow_mode):
+    return pd.concat(read_excel_vols_to_flat_df(f, dow_mode) for f in xlsx_filepaths)
+
+def read_excel_vols_to_flat_df(filepath, dow_mode):
+    print("parsing file:", filepath)
+    wb = load_workbook(filename=filepath, read_only=True)
+    counts = []
+    sheet_names = [sn for sn in wb.sheetnames if not sn.lower().endswith("photo")]
+    for sheet_name in sheet_names:
+        print("parsing sheet:", sheet_name)
+        counts.append(
+            read_sheet_vols_to_flat_df(
+                filepath,
+                wb,
+                sheet_name,
+                dow_mode,
+            )
+        )
+    return pd.concat(counts)
+
+def read_sheet_direction_vols_to_flat_df(filepath, workbook, sheet_name, direction, day_mode):
+    if dow_mode not in {"tuetothu", "anyweekday", "anyday"}:
+        raise KeyError("dow_mode should be tuetothu, anyweekday, or anyday")
+    day_num = -1
+    counts=[]
+    while True:
+        day_num += 1
+        try:
+            dow = read_day_dir_dayofweek(workbook, sheet_name, day_num)
+            date = read_date(workbook, sheet_name, day_num)
+            if (
+                (dow_mode == "anyday")
+                or ((dow_mode == "anyweekday") and is_weekday(dow))
+                or ((dow_mode == "tuetothu") and is_tuetothu(dow))
+            ):
+                df = read_day_dir_counts_df(filepath, sheet_name, direction, day_num)
+                df.insert(0, 'date', date)
+                df.insert(1, 'dow', dow)
+
+                counts.append(
+                    df
+                )
+        except EOFError:  # assume we've reached the end of the sheet
+            break
+    return pd.concat(counts)
+
+def read_sheet_vols_to_flat_df(filepath, workbook, sheet_name, day_mode):
+    # direction of tables on the right
+    dir0, dir1 = read_sheet_directions(workbook, sheet_name)
+    # avg daily total (in each direction)
+    df0 = read_sheet_direction_vols_to_flat_df(filepath, workbook, sheet_name, 0, day_mode)
+    df0.insert(0, 'sheet_name', sheet_name.replace(' ','-').split('-')[1])
+    df0.insert(1, 'direction', dir0)
+    counts = [df0]
+    if dir1 != "O":
+        df1 = read_sheet_direction_vols_to_flat_df(filepath, workbook, sheet_name, 1, day_mode)
+        df1.insert(0, 'sheet_name', sheet_name.replace(' ','-').split('-')[1])
+        df1.insert(1, 'direction',dir1)
+        counts.append(
+            df1
+        )
+    return pd.concat(counts)
+
+def join_location_metadata(counts_df, locations_filepath):
+    locations = pd.read_csv(
+        locations_filepath,
+        usecols=["id_nodir_2023", "id_withdir_2023", "name_2023", "direction"],
+    ).rename(columns=
+        {
+            "id_nodir_2023": "location_id_nodir",
+            "id_withdir_2023": "location_id_withdir",
+            "name_2023": "location",
+        }
+    )
+    locations['location_id_nodir'] = locations['location_id_nodir'].astype(str)
+
+    return pd.merge(locations, 
+                    counts_df, 
+                    left_on=['location_id_nodir','direction'],
+                    right_on=['sheet_name','direction'])
 
 def read_sheet_directions(workbook, sheet_name):
     return (
@@ -360,6 +472,13 @@ if __name__ == "__main__":
         raw_xlsx_glob_filepaths.parent.glob(raw_xlsx_glob_filepaths.name)
     )
     parse_wiltec_excel(
+        raw_xlsx_filepaths,
+        args.locations_filepath,
+        args.output_csv_filepath_stem,
+        dow_mode,
+    )
+
+    excels_to_csv(
         raw_xlsx_filepaths,
         args.locations_filepath,
         args.output_csv_filepath_stem,
