@@ -20,14 +20,14 @@ Data preparation scripts for the Congestion Management Program (CMP)
   - floating car runs: Q:\Data\Observed\Streets\Speed\CMP-floating_car_run\
 - transit
   - GTFS: Q:\Data\Networks\Transit\Muni\GTFS
+
 ## Sections/Metrics
 ### Transit
 #### APC
 ##### Download
-1. Reach out to SFMTA Transit Performance and Analytics (as of 2023: Simon.Hochberg@sfmta.com) for APC data for April & May of the CMP year.
+1. Reach out to SFMTA Transit Performance and Analytics for APC and GTFS data for April & May of the CMP year.
 2. Use TD&A's Box account (username: modeling@sfcta.org) for the transfer.
-3. Save the data to `Q:\Data\Observed\Transit\Muni\APC\`.
-(maybe also request GTFS from SFMTA) 
+3. Save the APC data to `Q:\Data\Observed\Transit\Muni\APC\`, and the GTFS data to `Q:\Data\Networks\Transit\Muni\GTFS`
 
 ##### Parsing
 - requires a GTFS stops GIS file, see GTFS section below.
@@ -49,6 +49,7 @@ Place the data at `Q:\Data\Networks\Transit\Muni\GTFS\`.
 ##### Analysis
 - For transit coverage calculations: Open `calendar.txt` to find the weekday `service_id` (for the period of analysis).
 - For transit volume and speed calculations: Use the GTFS Go plugin in QGIS to get the stops GIS file for input to transit_apc_volume_and_speed.py. Though it seems like `transit/apc/legacy/qaqc/SF_CMP2021_Transit_APC_QAQC.ipynb` has python code to do this extraction.
+
 #### Coverage
 ##### Calculate transit coverage
 1. Make the input toml file. These are saved in 
@@ -58,11 +59,19 @@ Place the data at `Q:\Data\Networks\Transit\Muni\GTFS\`.
 From PeMS data, use PeMS/.....py
 
 ### Speed: LOS and reliability
+The [monthly dashboard](https://cmp.sfcta.org/) used to be referred to as real-time, so there are still some references to `realtime`/`rt` left in the code/database.
 #### Floating car
 0. Not 100% sure, but I think: Before the monitoring period, `speed/inrix/sample_size_analysis.py` is used to determine which CMP segments need to have data collected on floating car runs to supplement the INRIX data.
 1. Run `parse_raw_data.py`.
 2. Use `compare_years.ipynb` to compare floating car data across years.
 #### INRIX (& merging floating car data in)
+1. Run the INRIX network conflation code for the CMP roadway network for the biennial reports (see [[speed/inrix/xd_segments/README.md]]).
+2. The INRIX data should already be downloaded to directories like `Q:\Data\Observed\Streets\INRIX\v2501\2025\04` for the monthly INRIX dashboard updates. If not, see the [Monthly Congestion Dashboard / INRIX: Data Download and Processing Guide](https://docs.google.com/document/d/1Pt7duNvKq12PCoeR6YsCwzVrQBAEsifi22JmQSo9gx8).
+3. Create the TOML config file using the template `speed/inrix/biennial_auto_los_reliability_20yy.toml`.
+4. `uv run speed/inrix/biennial_auto_los_reliability.py path/to/biennial_auto_los_reliability_20yy.toml` (with the TOML config file created in the last step)
+#### analysis
+- `speed/compare_years.ipynb`: scatter plot comparing speeds across 2 years
+- `warehouse_scripts\cmp\_README.md`
 
 ### Counts
 For intersection and midblock counts, see the READMEs in Counts/intersection and Counts/midblock.
