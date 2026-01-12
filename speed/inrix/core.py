@@ -88,7 +88,12 @@ def los_2000(road_class: pl.Expr, speed: pl.Expr):
 
 def read_cmp_inrix_conflation(filepath):
     """read CMP-INRIX segment correspondence table"""
-    conflation_df = pl.read_csv(filepath)
+    conflation_df = pl.read_csv(
+        filepath,
+        schema_overrides={
+            "INRIX_SegID": pl.UInt64,
+            }
+        )
     cmp_segment_conflated_length = conflation_df.group_by("CMP_SegID").agg(
         cmp_segment_conflated_length=pl.sum("Length_Matched")
     )
