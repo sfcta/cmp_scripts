@@ -1,0 +1,20 @@
+[geo]
+network_conflation_correspondence_filepath = "Q:/Data/Observed/Streets/INRIX/map-v2601/network_conflation/CMP/CMP_Segment_INRIX_Links_Correspondence_2601_Manual-expandednetwork.csv"
+cmp_shp = "Q:/GIS/Transportation/Roads/CMP/cmp_roadway_segments-expanded-v202204.gpkg"
+
+[input]
+dir = "Q:/Data/Observed/Streets/INRIX"
+map-version = "map-vYYMM"
+speeds-version = "speeds-vYYYYB"
+year = "YYYY"
+month = "MM"  ## use the month of the data, eg. 06 for June data
+end_date = "YYYY-MM-01"  ## use the next month of the data, eg. 07 for June data
+
+[output]
+base_dir = "Q:/CMP/Congestion_Tracker/viz_data"
+version = "vYYMM"
+filename_stem = "AutoSpeeds"
+
+[aggregate_config]
+config_dir  = "Y:/warehouse/scripts/cmprt"
+config_file = "aggregate_config.json"
