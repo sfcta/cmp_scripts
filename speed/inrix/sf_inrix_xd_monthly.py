@@ -55,7 +55,8 @@ if __name__ == "__main__":
 
     zip_filepaths = glob_inrix_xd_zips_directory(
         Path(config["input"]["dir"])
-        / config["input"]["version"]
+        / config["input"]["map-version"]
+        / config["input"]["speeds-version"]
         / config["input"]["year"]
         / config["input"]["month"],
         f"*{config['input']['end_date']}*.zip",
